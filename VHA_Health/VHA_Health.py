@@ -9,7 +9,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 import random
 import json
-import sklearn
+import sklearn as sk
 random.seed(30)
 
 def create_sample_weights(y_train, weights='balanced'):
@@ -101,48 +101,83 @@ def convert(data):
             data[i]==1
     return data
 
-def create_predictions(x_dict, COVID_19_model, days_hospitalized_model,
-                       deceased_model, vent_model, icu_model):
-    keys=list(set(x_dict[0].keys()).intersection(x_dict[1:].keys))
-    keys_to_val=[keys[i]:i for i in range(len(keys))]
-    x_test=np.zeros(len(keys), len(x_dict))
+def create_predictions(x_dict, all_ids, COVID_19_model, days_hospitalized_model,
+                       deceased_model, vent_model, icu_days_model):
+    keys=list(set(x_dict[0].keys()).intersection(*[i.keys() for i in x_dict[1:]]))
+    x_test=np.zeros(shape=(len(keys), len(x_dict)))
     for i in range(len(x_dict)):
         curr_dict=x_dict[i]
         for j in range(len(keys)):
-            x_test[j][i]=curr_dict[keys]
+            x_test[j][i]=curr_dict[keys[j]]
     COVID_19_predictions=COVID_19_model.predict(x_test)
     COVID_positive_indicies=np.where(COVID_19_predictions==1)[0]
     x_test_positive=np.array([x_test[i] for i in COVID_positive_indicies])
+    days_hospitalized_predictions=days_hospitalized_model.predict(x_test_positive)
+    deceased_predictions=deceased_model.predict_proba(x_test_positive)[:, 1]
+    vent_predictions=vent_model.predict_proba(x_test_positive)[:, 1]
+    icu_days_predictions=icu_days_model.predict(x_test_positive)
+    COVID_19_proba=COVID_19_model.predict_proba(x_test)[:, 1]
+    COVID_19_dict={i:0 for i in all_ids}
+    days_hospitalized_dict={i:0 for i in all_ids}
+    deceased_dict={i:1 for i in all_ids}
+    vent_dict={i:0 for i in all_ids}
+    icu_days_dict={i:0 for i in all_ids}
+    for i in range(len(COVID_19_proba)):
+        COVID_19_dict[keys[i]]=COVID_19_proba[i]
+    for i in range(len(COVID_positive_indicies)):
+        days_hospitalized_dict[keys[COVID_positive_indicies[i]]]=days_hospitalized_predictions[i]
+        deceased_dict[keys[COVID_positive_indicies[i]]]=deceased_predictions[i]
+        vent_dict[keys[COVID_positive_indicies[i]]]=vent_predictions[i]
+        icu_days_dict[keys[COVID_positive_indicies[i]]]=icu_days_predictions[i]
+    all_data=[COVID_19_dict, days_hospitalized_dict, icu_days_dict, vent_dict, deceased_dict]
+    for i in range(len(all_data)):
+        all_data[i]=pd.DataFrame([[a, b] for a, b in all_data[i].items()])
+    prefix=r'C:\Users\johna\OneDrive\Documents\Python\Datasets\VHA_health\test\\'
+    files=[open(prefix+'COVID_19.csv', 'w', newline='\n'),
+           open(prefix+'days_hospitalized.csv', 'w', newline='\n'),
+           open(prefix+'icu_days.csv', 'w', newline='\n'),
+           open(prefix+'vent.csv', 'w', newline='\n'),
+           open(prefix+'deceased.csv', 'w', newline='\n')]
+    print('pickling')
+    for i in range(len(files)):
+        all_data[i].to_csv(files[i], header=False, index=False)
+    for i in files:
+        i.close()
+    return all_data
+ 
     
 x_dict_file=open(r'C:\Users\johna\OneDrive\Documents\Python\Datasets\VHA_health\train\x_dict', 'r')
+x_dict_test_file=open(r'C:\Users\johna\OneDrive\Documents\Python\Datasets\VHA_health\test\x_dict', 'r')
 y_dict_file=open(r'C:\Users\johna\OneDrive\Documents\Python\Datasets\VHA_health\train\y_dict', 'r')
 x_dict=json.load(x_dict_file)
+x_dict_test=json.load(x_dict_test_file)
 y_dict=json.load(y_dict_file)
+x_dict_test_file.close()
 x_dict_file.close()
 y_dict_file.close()
 x_data, y_data=create_data(x_dict, y_dict)
-
+patients=pd.read_csv(r'C:\Users\johna\OneDrive\Documents\Python\Datasets\VHA_health\test\patients.csv')
+all_IDs=patients.Id
 #usually 4 1 split when training
-COVID_19_split=117959
+COVID_19_split=80000
 COVID_19_model=GradientBoostingClassifier()
 COVID_19_model.fit(x_data[0][:COVID_19_split], y_data[0][:COVID_19_split],
-                   sample_weight=create_sample_weights(y_data[0][:COVID_19_split]))
+                   sample_weight=create_sample_weights(y_data[0][:COVID_19_split], [5, 1]))
 print(COVID_19_model.score(x_data[0][COVID_19_split:], y_data[0][COVID_19_split:]))
 COVID_19_predictions=COVID_19_model.predict(x_data[0][COVID_19_split:])
 print(evaluate_classifiers(COVID_19_predictions, y_data[0][COVID_19_split:], 1))
 COVID_19_probabilities=COVID_19_model.predict_proba(x_data[0][COVID_19_split:])[:, 1]
 disp = sk.metrics.plot_precision_recall_curve(COVID_19_model, x_data[0][COVID_19_split:],  y_data[0][COVID_19_split:])
 plt.show()
-
 new_keys, pa_x_data, pa_y_data=prediction_aided_data(x_dict, y_dict, y_data[0])
 
-days_hospitalized_split=73697
-days_hospitalized_model=GradientBoostingRegressor(max_depth=3)
+days_hospitalized_split=70000
+days_hospitalized_model=GradientBoostingRegressor()
 days_hospitalized_model.fit(pa_x_data[0][:days_hospitalized_split], pa_y_data[0][:days_hospitalized_split])
 print(days_hospitalized_model.score(pa_x_data[0][days_hospitalized_split:], pa_y_data[0][days_hospitalized_split:]))
 days_hospitalized_predictions=days_hospitalized_model.predict(pa_x_data[0][days_hospitalized_split:])
 
-deceased_split=73697
+deceased_split=70000
 deceased_model=GradientBoostingClassifier()
 deceased_model.fit(pa_x_data[1][:deceased_split], pa_y_data[1][:deceased_split],
                    sample_weight=create_sample_weights(pa_y_data[1][:deceased_split]))
@@ -150,21 +185,24 @@ print(deceased_model.score(pa_x_data[1][deceased_split:], pa_y_data[1][deceased_
 deceased_predictions=deceased_model.predict(pa_x_data[1][deceased_split:])
 print(evaluate_classifiers(deceased_predictions, pa_y_data[1][deceased_split:], 1))
 deceased_probabilities=COVID_19_probabilities=deceased_model.predict_proba(pa_x_data[1][deceased_split:])[:, 1]
-disp = plot_precision_recall_curve(deceased_model, pa_x_data[1][deceased_split:],  pa_y_data[1][deceased_split:])
+disp = sk.metrics.plot_precision_recall_curve(deceased_model, pa_x_data[1][deceased_split:],  pa_y_data[1][deceased_split:])
 plt.show()
 
-vent_split=73697
+vent_split=70000
 vent_model=GradientBoostingClassifier()
-vent_model.fit(pa_x_data[2][:vent_split], pa_y_data[2][:vent_split])
+vent_model.fit(pa_x_data[2][:vent_split], pa_y_data[2][:vent_split],
+               sample_weight=create_sample_weights(pa_y_data[2][:vent_split], weights=[1, 1]))
 print(vent_model.score(pa_x_data[2][vent_split:], pa_y_data[2][vent_split:]))
 vent_predictions=vent_model.predict(pa_x_data[2][vent_split:])
 print(evaluate_classifiers(vent_predictions, pa_y_data[2][vent_split:], 1))
 vent_probabilities=vent_model.predict_proba(pa_x_data[2][vent_split:])[:, 1]
-disp = plot_precision_recall_curve(deceased_model, pa_x_data[2][vent_split:],  pa_y_data[2][vent_split:])
+disp = sk.metrics.plot_precision_recall_curve(vent_model, pa_x_data[2][vent_split:],  pa_y_data[2][vent_split:])
 plt.show()
 
-icu_days_split=73697
+icu_days_split=70000
 icu_days_model=GradientBoostingRegressor()
 icu_days_model.fit(pa_x_data[3][:icu_days_split], pa_y_data[3][:icu_days_split])
 print(icu_days_model.score(pa_x_data[3][icu_days_split:], pa_y_data[3][icu_days_split:]))
 
+out=create_predictions(x_dict_test, all_IDs, COVID_19_model, days_hospitalized_model,
+                       deceased_model, vent_model, icu_days_model)

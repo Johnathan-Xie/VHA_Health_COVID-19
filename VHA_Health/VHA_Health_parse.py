@@ -92,7 +92,14 @@ medications=pd.read_csv(os.path.join(prefix, 'medications.csv'))
 payers=pd.read_csv(os.path.join(prefix, 'payers.csv'))
 providers=pd.read_csv(os.path.join(prefix, 'providers.csv'))
 
-patient_IDs=list(patients[patients.Id==patients.Id].Id)
+deathdates=list(patients.DEATHDATE)
+#for training
+valid_deathdates=set(i for i in deathdates if (i==i and convert_to_date(i).year>2019))
+patient_IDs=list(patients.Id)
+patient_IDs=[patient_IDs[i] for i in range(len(patient_IDs)) if (deathdates[i]!=deathdates[i] or
+                                                    deathdates[i] in valid_deathdates
+                                                    and patient_IDs[i]==patient_IDs[i])]
+#for training add or if deathdates in valid deathdates
 
 all_data=np.array([allergies, imaging_studies, conditions, patients, observations, care_plans, encounters,
                    devices, supplies, procedures, medications, immunizations, supplies, payers, providers])
@@ -126,9 +133,12 @@ for i in covid_patient_ids:
 #(encounters.REASONCODE==840539006) & (encounters.CODE == 1505002)
 
 hospitalized_days={i:0 for i in patient_IDs}
-for i, j, k in zip(encounters[(encounters.REASONCODE==840539006) & (encounters.CODE == 1505002)].PATIENT,
-                   encounters[(encounters.REASONCODE==840539006) & (encounters.CODE == 1505002)].START,
-                   encounters[(encounters.REASONCODE==840539006) & (encounters.CODE == 1505002)].STOP):
+for i, j, k in zip(encounters[(encounters.REASONCODE==840539006) & (encounters.CODE == 1505002)
+                              & (encounters.PATIENT.isin(patient_IDs))].PATIENT,
+                   encounters[(encounters.REASONCODE==840539006) & (encounters.CODE == 1505002)
+                              & (encounters.PATIENT.isin(patient_IDs))].START,
+                   encounters[(encounters.REASONCODE==840539006) & (encounters.CODE == 1505002)
+                              & (encounters.PATIENT.isin(patient_IDs))].STOP):
     hospitalized_days[i]+=convert_to_time(j, k)
 
 deceased_patients={i:1 for i in patient_IDs}
@@ -140,9 +150,12 @@ for i in vent_ids:
     vent_status[i]=1
 
 icu_days={i:0 for i in patient_IDs}
-for i, j, k in zip(encounters[(encounters.CODE==305351004) & (encounters.PATIENT.isin(covid_patient_ids))].PATIENT,
-                   encounters[(encounters.CODE==305351004) & (encounters.PATIENT.isin(covid_patient_ids))].START,
-                   encounters[(encounters.CODE==305351004) & (encounters.PATIENT.isin(covid_patient_ids))].STOP):
+for i, j, k in zip(encounters[(encounters.CODE==305351004) & (encounters.PATIENT.isin(covid_patient_ids))
+                              & (encounters.PATIENT.isin(patient_IDs))].PATIENT,
+                   encounters[(encounters.CODE==305351004) & (encounters.PATIENT.isin(covid_patient_ids))
+                              & (encounters.PATIENT.isin(patient_IDs))].START,
+                   encounters[(encounters.CODE==305351004) & (encounters.PATIENT.isin(covid_patient_ids))
+                              & (encounters.PATIENT.isin(patient_IDs))].STOP):
     icu_days[i]+=convert_to_time(j, k)
 
 y_train=[COVID_19, hospitalized_days, deceased_patients, vent_status, icu_days]
@@ -220,53 +233,60 @@ x_train_columns=['age',  'gender', 'Asian', 'White', 'Black', 'HIV', 'stroke',
                  'has diabetes', 'has chronic kidney disease', 'has liver disease']
 #finding patient_ids with certain info
 ages={i:(convert_ages(k)-convert_to_date(j)).days/365.25 for i, j, k in
-      zip(patients[patients.Id==patients.Id].Id,
-          patients[patients.Id==patients.Id].BIRTHDATE,
-          patients[patients.Id==patients.Id].DEATHDATE)}
+      zip(patients[patients.Id.isin(patient_IDs)].Id,
+          patients[patients.Id.isin(patient_IDs)].BIRTHDATE,
+          patients[patients.Id.isin(patient_IDs)].DEATHDATE)}
 
 gender={i:0 for i in patient_IDs}
-female_IDs=patients[(patients.GENDER=='F')].Id
+female_IDs=patients[(patients.GENDER=='F') & (patients.Id.isin(patient_IDs))].Id
 for i in female_IDs:
     gender[i]=1
 
 asian={i:0 for i in patient_IDs}
-asian_IDs=patients[(patients.RACE=='asian')].Id
+asian_IDs=patients[(patients.RACE=='asian') & (patients.Id.isin(patient_IDs))].Id
 for i in asian_IDs:
     asian[i]=1
 
 white={i:0 for i in patient_IDs}
-white_IDs=patients[(patients.RACE=='white')].Id
+white_IDs=patients[(patients.RACE=='white') & (patients.Id.isin(patient_IDs))].Id
 for i in white_IDs:
     white[i]=1
 
 black={i:0 for i in patient_IDs}
-black_IDs=patients[(patients.RACE=='black')].Id
+black_IDs=patients[(patients.RACE=='black') & (patients.Id.isin(patient_IDs))].Id
 for i in black_IDs:
     black[i]=1
 
-healthcare_coverage={i:j for i, j in zip(patients.Id, patients.HEALTHCARE_COVERAGE)}
-healthcare_expenses={i:j for i, j in zip(patients.Id, patients.HEALTHCARE_EXPENSES)}
-lung_disease=dict()
-for i in patient_IDs:
-    lung_disease[i]=0
+healthcare_coverage={i:j for i, j in zip(
+    patients[patients.Id.isin(patient_IDs)].Id,
+    patients[patients.Id.isin(patient_IDs)].HEALTHCARE_COVERAGE)}
+healthcare_expenses={i:j for i, j in zip(
+    patients[patients.Id.isin(patient_IDs)].Id,
+    patients[patients.Id.isin(patient_IDs)].HEALTHCARE_EXPENSES)}
 
 HIV_patients=observations[(observations.DESCRIPTION=='HIV status') &
-                          (observations.VALUE=='HIV positive')].PATIENT.unique()
+                          (observations.VALUE=='HIV positive') &
+                          (observations.PATiENT.isin(patient_IDs))].PATIENT.unique()
 HIV={i:0 for i in patient_IDs}
 for i in HIV_patients:
     HIV[i]=1
 
-stroke_patients=conditions[conditions.DESCRIPTION=='stroke']
+stroke_patients=conditions[(conditions.DESCRIPTION=='stroke') &
+                           (conditions.PATIENT.isin(patient_IDs))].PATIENT
 stroke={i:0 for i in patient_IDs}
 for i in stroke_patients:
     stroke[i]=1
 
 cardiac_arrest_signs=['History of cardiac arrest (situation)', 'Cardiac Arrest']
-cardiac_arrest_patients=conditions[conditions.DESCRIPTION.isin(cardiac_arrest_signs)]
+cardiac_arrest_patients=conditions[conditions.DESCRIPTION.isin(cardiac_arrest_signs)
+                                   & (conditions.PATIENT.isin(patient_IDs))].PATIENT
 cardiac_arrest={i:0 for i in patient_IDs}
 for i in cardiac_arrest_patients:
     cardiac_arrest[i]=1
 
+lung_disease=dict()
+for i in patient_IDs:
+    lung_disease[i]=0
 
 small_lung_disease_descriptions=['Small cell carcinoma of lung (disorder)',
                                  'Primary small cell malignant neoplasm of lung  TNM stage 1 (disorder)',
@@ -275,31 +295,38 @@ non_small_lung_disease_descriptions=['Non-small cell carcinoma of lung  TNM stag
                                     'Non-small cell lung cancer (disorder)',
                                     'Non-small cell carcinoma of lung  TNM stage 2 (disorder)']
 small_lung_disease_ids=conditions[(conditions.DESCRIPTION.isin(small_lung_disease_descriptions))
-                                  & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                                  & (conditions.STOP!=conditions.STOP)
+                                   & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 non_small_lung_disease_ids=conditions[(conditions.DESCRIPTION.isin(non_small_lung_disease_descriptions))
-                                      & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                                      & (conditions.STOP!=conditions.STOP)
+                                       & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 for i in small_lung_disease_ids:
     lung_disease[i]=1
 
 for i in non_small_lung_disease_ids:
     lung_disease[i]=2
 
-asthma_patient_IDs=conditions[(conditions.DESCRIPTION=='Childhood asthma') & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+asthma_patient_IDs=conditions[(conditions.DESCRIPTION=='Childhood asthma')
+                              & (conditions.STOP!=conditions.STOP)
+                              & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 asthma={i:0 for i in patient_IDs}
 for i in asthma_patient_IDs:
     asthma[i]=1
 
 heart_condition_descriptions=['Injury of heart (disorder)', 'Chronic congestive heart failure (disorder)']
 heart_conditions_IDs=conditions[(conditions.DESCRIPTION.isin(heart_condition_descriptions))
-                                & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                                & (conditions.STOP!=conditions.STOP)
+                                & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 heart_conditions={i:0 for i in patient_IDs}
 for i in heart_conditions_IDs:
     heart_conditions[i]=1
 
 obese_ids=conditions[(conditions.DESCRIPTION=='Body mass index 30+ - obesity (finding)')
-                     & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                     & (conditions.STOP!=conditions.STOP)
+                     & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 severly_obese_ids=conditions[(conditions.DESCRIPTION=='Body mass index 40+ - severely obese (finding)')
-                             & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                             & (conditions.STOP!=conditions.STOP)
+                             & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 obesity={i:0 for i in patient_IDs}
 for i in obese_ids:
     obesity[i]=1
@@ -316,18 +343,22 @@ diabetes_descriptions=['Macular edema and retinopathy due to type 2 diabetes mel
                        'Neuropathy due to type 2 diabetes mellitus (disorder)',
                        'Proteinuria due to type 2 diabetes mellitus (disorder)']
 diabetes_ids=conditions[(conditions.DESCRIPTION.isin(diabetes_descriptions))
-                                & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                        & (conditions.STOP!=conditions.STOP)
+                        & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 diabetes={i:0 for i in patient_IDs}
 for i in diabetes_ids:
     diabetes[i]=1
 
 kidney_one_descriptions=['Chronic kidney disease stage 2 (disorder)', 'Injury of kidney (disorder)']
 kidney_one_ids=conditions[(conditions.DESCRIPTION.isin(kidney_one_descriptions))
-                                & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                          & (conditions.STOP!=conditions.STOP)
+                          & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 kidney_two_ids=conditions[(conditions.DESCRIPTION=='Chronic kidney disease stage 2 (disorder)')
-                                & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                          & (conditions.STOP!=conditions.STOP)
+                          & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 kidney_three_ids=conditions[(conditions.DESCRIPTION=='Chronic kidney disease stage 3 (disorder)')
-                                & (conditions.STOP!=conditions.STOP)].PATIENT.unique()
+                            & (conditions.STOP!=conditions.STOP)
+                            & (conditions.PATIENT.isin(patient_IDs))].PATIENT.unique()
 kidney_disease={i:0 for i in patient_IDs}
 for i in kidney_one_ids:
     kidney_disease[i]=1
@@ -341,6 +372,9 @@ for i in kidney_three_ids:
 x_train=[ages, gender, asian, white, black, HIV, stroke, cardiac_arrest, 
          healthcare_coverage, healthcare_expenses, lung_disease, asthma,
          heart_conditions, obesity, diabetes, kidney_disease]
+x_test_file=open(r'C:\Users\johna\OneDrive\Documents\Python\Datasets\VHA_health\test\x_dict', 'w')
+x_test_file.close()
 x_train_file=open(r'C:\Users\johna\OneDrive\Documents\Python\Datasets\VHA_health\train\x_dict', 'w')
 json.dump(x_train, x_train_file)
 x_train_file.close()
+
