@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import cross_val_score
 import random
 import json
 import sklearn as sk
@@ -101,7 +102,7 @@ def convert(data):
             data[i]==1
     return data
 
-def create_predictions(x_dict, all_ids, COVID_19_model, days_hospitalized_model,
+def create_predictions(x_dict, all_IDs, COVID_19_model, days_hospitalized_model,
                        deceased_model, vent_model, icu_days_model):
     keys=list(set(x_dict[0].keys()).intersection(*[i.keys() for i in x_dict[1:]]))
     x_test=np.zeros(shape=(len(keys), len(x_dict)))
@@ -117,11 +118,11 @@ def create_predictions(x_dict, all_ids, COVID_19_model, days_hospitalized_model,
     vent_predictions=vent_model.predict_proba(x_test_positive)[:, 1]
     icu_days_predictions=icu_days_model.predict(x_test_positive)
     COVID_19_proba=COVID_19_model.predict_proba(x_test)[:, 1]
-    COVID_19_dict={i:0 for i in all_ids}
-    days_hospitalized_dict={i:0 for i in all_ids}
-    deceased_dict={i:1 for i in all_ids}
-    vent_dict={i:0 for i in all_ids}
-    icu_days_dict={i:0 for i in all_ids}
+    COVID_19_dict={i:0 for i in all_IDs}
+    days_hospitalized_dict={i:0 for i in all_IDs}
+    deceased_dict={i:1 for i in all_IDs}
+    vent_dict={i:0 for i in all_IDs}
+    icu_days_dict={i:0 for i in all_IDs}
     for i in range(len(COVID_19_proba)):
         COVID_19_dict[keys[i]]=COVID_19_proba[i]
     for i in range(len(COVID_positive_indicies)):
@@ -161,6 +162,9 @@ all_IDs=patients.Id
 #usually 4 1 split when training
 COVID_19_split=80000
 COVID_19_model=GradientBoostingClassifier()
+print(sk.model_selection.cross_val_score(GradientBoostingClassifier(), x_data[0], y_data[0], cv=5,
+                                              fit_params={'sample_weight':create_sample_weights(y_data[0], [5, 1])}))
+
 COVID_19_model.fit(x_data[0][:COVID_19_split], y_data[0][:COVID_19_split],
                    sample_weight=create_sample_weights(y_data[0][:COVID_19_split], [5, 1]))
 print(COVID_19_model.score(x_data[0][COVID_19_split:], y_data[0][COVID_19_split:]))
